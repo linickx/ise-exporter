@@ -104,10 +104,23 @@ def route_root():
         except:
             return display_error("Variable " + expected_var + " not set in " + yfile)
 
-    # Request some stats
-    iseRestAPI = {"activecount":"/admin/API/mnt/Session/ActiveCount", "posturecount":"/admin/API/mnt/Session/PostureCount", "profilercount":"/admin/API/mnt/Session/ProfilerCount"}
-    api_response = {}
+    # Allow for the rest version to be change, default on version 2
+    try:
+        api_ver = str(ciscoyaml['rest_ver'])
+    except:
+        api_ver = '2'
 
+    # Select Correct URLs
+    if api_ver == '1':
+        logger.info("ISE API Version set to " + api_ver)
+        iseRestAPI = {"activecount":"/ise/mnt/Session/ActiveCount", "posturecount":"/ise/mnt/Session/PostureCount", "profilercount":"/ise/mnt/Session/ProfilerCount"}
+    elif api_ver == '2':
+        iseRestAPI = {"activecount":"/admin/API/mnt/Session/ActiveCount", "posturecount":"/admin/API/mnt/Session/PostureCount", "profilercount":"/admin/API/mnt/Session/ProfilerCount"}
+    else:
+        return display_error("Unexpected rest_ver in " + yfile)
+
+    # Request some stats
+    api_response = {}
     for key, value in iseRestAPI.items():
         logger.info("Counter: %s | Path: %s", key, value)
         r_url = "https://" + ciscoyaml['adm_node'] + value
