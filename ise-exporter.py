@@ -10,7 +10,6 @@
     TODO:
     * Don't use globals!
     * Test / Travis
-    * Custom UA string for requests
 
 """
 
@@ -23,7 +22,7 @@ from xml.etree import ElementTree
 
 logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO) # change WARNING to DEBUG if you are a ninja
 logger = logging.getLogger("ise")
-version = "0.1"
+version = "0.2"
 
 try:
     import yaml
@@ -73,13 +72,24 @@ app = Flask(__name__)
 def route_root():
     """ Respond to requests :)
     """
-    global logger
     global version
+    global headers
+    string = '<html><head><title>Cisco ISE Exporter</title></head>\
+<body><h1>Cisco ISE Exporter for Prometheus v{}</h1><p><a href="/metrics">Metrics</a></p></body>\
+</html>'.format(version)
+    return string
+
+@app.route("/metrics")
+def route_metrics():
+    """ print metrics
+    """
+    global logger
+    global server
     global version
     global headers
 
-    yfile = "/etc/ise-exporter/ise.yml"
-    cafile = "/etc/ise-exporter/ca_bundle.pem"
+    yfile = os.getenv('ISE_FILE', "/etc/ise-exporter/ise.yml")
+    cafile = os.getenv('CA_FILE',"/etc/ise-exporter/ca_bundle.pem")
 
     if os.path.isfile(yfile) is False:
         return display_error("Cannot find file: " + yfile)
@@ -119,20 +129,93 @@ def route_root():
     else:
         return display_error("Unexpected rest_ver in " + yfile)
 
+    # Things to request:
+    the_https_requests = []
+    for key, value in iseRestAPI.items():
+        logger.debug("Mnt Counter: %s | Path: %s", key, value)
+        url = "https://" + ciscoyaml['adm_node'] + value
+        auth=(ciscoyaml['rest_uid'], ciscoyaml['rest_pw'])
+        the_request = {"metric":key, "url":url, "auth":auth, "type":"mnt"}
+        the_https_requests.append(the_request)
+
+    # ERS support
+    try:
+        ers_enabled = str(ciscoyaml['ers_enabled'])
+    except:
+        ers_enabled = 'False'
+
+
+    if ers_enabled == 'True':
+        logger.info('External RESTful Services (ERS) Enabled')
+
+        ersAPI = {"internaluser":"/ers/config/internaluser", "networkdevice":"/ers/config/networkdevice"}
+        accept_headers = {
+            "internaluser":"application/vnd.com.cisco.ise.identity.internaluser.1.0+xml", "networkdevice":"application/vnd.com.cisco.ise.network.networkdevice.1.1+xml",
+            "activeguestaccounts":"application/vnd.com.cisco.ise.identity.guestuser.2.0+xml"
+            }
+
+        for key, value in ersAPI.items():
+            logger.debug("ERS Counter: %s | Path: %s", key, value)
+            url = "https://" + ciscoyaml['adm_node'] + ":9060" + value
+            auth=(ciscoyaml['rest_uid'], ciscoyaml['rest_pw'])
+            the_request = {"metric":key, "url":url, "auth":auth, "type":"ers", "accept_headers":accept_headers[key]}
+            the_https_requests.append(the_request)
+
+        # Look for Guest ERS API Credentials
+        try:
+            ers_guest_uid = ciscoyaml['ers_guest_uid']
+            ers_guest_pw = ciscoyaml['ers_guest_pw']
+            #
+            # ers_guest = True
+            # MANUALLY DISABLING
+            # ------------------
+            # This doesn't work as expected.
+            # Status=ACTIVE returns all accounts
+            # based on query size
+            ers_guest = False
+        except:
+            ers_guest = False
+
+        if ers_guest:
+            try:
+                ers_guest_qsize = ciscoyaml['ers_guest_qsize']
+            except:
+                ers_guest_qsize = '100'
+
+            logger.info("ERS Guest Enabled, Query Size: %s", ers_guest_qsize)
+            url = "https://" + ciscoyaml['adm_node'] + ":9060/ers/config/guestuser?status=ACTIVE&size=" + ers_guest_qsize
+            auth=(ers_guest_uid, ers_guest_pw)
+            metric = "activeguestaccounts"
+            the_request = {"metric":metric, "url":url, "auth":auth, "type":"ers", "accept_headers":accept_headers[metric]}
+            the_https_requests.append(the_request)
+
+
     # Request some stats
     api_response = {}
-    for key, value in iseRestAPI.items():
-        logger.info("Counter: %s | Path: %s", key, value)
-        r_url = "https://" + ciscoyaml['adm_node'] + value
+    for each_https_request in the_https_requests:
+        logger.info(each_https_request['url'])
+        metric = str(each_https_request['metric'])
+        request_headers = {'user-agent':server} # Reset the headers each time
         try:
-            r = requests.get(r_url, verify=r_ssl_verify, auth=(ciscoyaml['rest_uid'], ciscoyaml['rest_pw']))
-            root = ElementTree.fromstring(r.content)
-            api_response[key] = root[0].text
+            if each_https_request['type'] == "mnt":
+                r = requests.get(each_https_request['url'], verify=r_ssl_verify, auth=each_https_request['auth'])
+                root = ElementTree.fromstring(r.content)
+                api_response[metric] = root[0].text
+            if each_https_request['type'] == "ers":
+                request_headers['ACCEPT'] = each_https_request['accept_headers'] # update header
+                r = requests.get(each_https_request['url'], verify=r_ssl_verify, auth=each_https_request['auth'], headers=request_headers)
+                root = ElementTree.fromstring(r.content)
+                logger.debug(r.content)
+                no_of_xmls = len(root[0]) # count the number of entries in the XML
+                api_response[metric] = str(no_of_xmls)
+
         except:
             # strictly speaking this should have status code 502 bad gateway as this is an upstream/proxy error
             return display_error("Failed to Connect to ISE | Exception: " + str(sys.exc_info()[1]))
 
     logger.info(str(api_response)) # Quick summary of what we got back!
+
+
     prometheus_string = ""
 
     # build the text string (response)
