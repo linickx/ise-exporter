@@ -1,4 +1,4 @@
-FROM python:alpine
+FROM python:3.10-alpine
 MAINTAINER  Nick <linickx.com>
 RUN pip install Flask pyyaml requests
 
