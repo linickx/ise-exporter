@@ -1,5 +1,5 @@
 FROM python:alpine
-MAINTAINER  Nick <linickx.com>
+LABEL maintainer="Nick [linickx.com]"
 RUN pip install Flask pyyaml requests
 
 COPY ise-exporter.py  /bin/ise-exporter
