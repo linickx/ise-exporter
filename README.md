@@ -1,4 +1,4 @@
-# ise-exporter  [![Docker Build Statu](https://img.shields.io/docker/build/linickx/ise-exporter.svg)](https://hub.docker.com/r/linickx/ise-exporter/)
+# ise-exporter 
 A Prometheus Cisco ISE Exporter for the [MNT API](http://www.cisco.com/c/en/us/td/docs/security/ise/2-2/api_ref_guide/api_ref_book/ise_api_ref_ch1.html) and [ERS API](http://www.cisco.com/c/en/us/td/docs/security/ise/2-2/api_ref_guide/api_ref_book/ise_api_ref_ers1.html)
 
 ## Examples
